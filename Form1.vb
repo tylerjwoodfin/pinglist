@@ -1,11 +1,19 @@
 ﻿Imports System.Data.OleDb
 Imports Microsoft.VisualBasic.FileIO
 Imports System.IO
+Imports System.Text.RegularExpressions
 
 Public Class Form1
     Dim thedatatable As New DataTable
 
+    Dim headersSet = False
+    Dim header1 = ""
+    Dim header2 = ""
+    Dim ipColumnIndex = -1
+
     Private Sub Button1_Click(sender As Object, e As EventArgs) Handles LoadCSV.Click
+
+        Label1.Visible = False
 
         Dim rowIndex As Integer
 
@@ -27,73 +35,113 @@ Public Class Form1
             tfp.Delimiters = New String() {","}
             tfp.TextFieldType = FieldType.Delimited
 
-
-            'tfp.ReadLine() ' skip header
-
-            Dim header1 = ""
-            Dim header2 = ""
-
             While tfp.EndOfData = False
                 Dim fields = tfp.ReadFields()
                 Dim column1 = fields(0)
                 Dim column2 = fields(1)
 
-                If rowIndex = 0 Then
-                    header1 = column1
-                    header2 = column2
+                If headersSet = False Then
 
-                    With thedatatable
-                        .Columns.Add(header1, System.Type.GetType("System.String"))
-                        .Columns.Add(header2, System.Type.GetType("System.String"))
-                    End With
+                    If column1.Contains(".") Or column2.Contains(".") Then
+                        header1 = "IP Address"
+                        header2 = "Client Name"
+
+                        With thedatatable
+                            .Columns.Add(header1, System.Type.GetType("System.String"))
+                            .Columns.Add(header2, System.Type.GetType("System.String"))
+                            .Columns.Add("Status", System.Type.GetType("System.String"))
+                        End With
+
+                        Dim newrow As DataRow = thedatatable.NewRow
+                        newrow(header1) = column1
+                        newrow(header2) = column2
+                        newrow("Status") = "--"
+                        thedatatable.Rows.Add(newrow)
+                    Else
+                        header1 = column1
+                        header2 = column2
+
+                        With thedatatable
+                            .Columns.Add(header1, System.Type.GetType("System.String"))
+                            .Columns.Add(header2, System.Type.GetType("System.String"))
+                            .Columns.Add("Status", System.Type.GetType("System.String"))
+                        End With
+                    End If
+
+                    headersSet = True
                 Else
                     Dim newrow As DataRow = thedatatable.NewRow
                     newrow(header1) = column1
                     newrow(header2) = column2
+                    newrow("Status") = "--"
                     thedatatable.Rows.Add(newrow)
+                End If
+
+                If ipColumnIndex = -1 Then
+                    If Regex.Matches(column1, "\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").Count = 1 Then
+                        ipColumnIndex = 0
+                    ElseIf Regex.Matches(column2, "\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").Count = 1 Then
+                        ipColumnIndex = 1
+                    End If
                 End If
 
                 rowIndex += 1
 
             End While
 
-            'With thedatatable
-            '    .Columns.Add("customer", System.Type.GetType("System.String"))
-            '    .Columns.Add("product", System.Type.GetType("System.String"))
-            '    .Columns.Add("thedate", System.Type.GetType("System.DateTime"))
-            '    .Columns.Add("thevalue", System.Type.GetType("System.Double"))
-            'End With
-
-            'Dim newrow As DataRow = thedatatable.NewRow
-            'newrow("customer") = "Customer 1"
-            'newrow("product") = "Product 1"
-            'newrow("thedate") = Today
-            'newrow("thevalue") = "123.45"
-            'thedatatable.Rows.Add(newrow)
-
-            'Dim newrow1 As DataRow = thedatatable.NewRow
-            'newrow1("customer") = "Customer 2"
-            'newrow1("product") = "Product 2"
-            'newrow1("thedate") = Today.AddDays(1)
-            'newrow1("thevalue") = "34.67"
-            'thedatatable.Rows.Add(newrow1)
-
-            'Dim newrow2 As DataRow = thedatatable.NewRow
-            'newrow2("customer") = "Customer 3"
-            'newrow2("product") = "Product 3"
-            'newrow2("thedate") = Today.AddDays(2)
-            'newrow2("thevalue") = "862.45"
-            'thedatatable.Rows.Add(newrow2)
-
-            ' MsgBox(thedatatable.Rows.Count)
-
             grid1.DataSource = thedatatable
+            Run.Enabled = True
 
-            'For Each drow As DataRow In thedatatable.Rows
-            '    MsgBox(drow(header1) & vbCrLf & drow(header2))
-            'Next
+
         End If
 
     End Sub
 
+    Private Sub RunToolStripMenuItem_Click(sender As Object, e As EventArgs) Handles Run.Click
+
+        If ipColumnIndex = -1 Then
+            MsgBox("Please check that you have valid IP addresses in either the left or right column.")
+        Else
+            For Each drow As DataRow In thedatatable.Rows
+
+                Dim ipAddress As String = drow.ItemArray.ElementAt(ipColumnIndex).ToString
+                ' MsgBox("Scanning ." & ipAddress & ".")
+
+                If Regex.Matches(ipAddress, "\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").Count = 1 Then
+                    Try
+                        If My.Computer.Network.Ping(ipAddress, 1000) Then
+                            drow.SetField("Status", "Online")
+                        Else
+                            drow.SetField("Status", "Offline")
+                        End If
+                    Catch ex As Exception
+                        drow.SetField("Status", "Offline")
+                    End Try
+
+                Else
+                    drow.SetField("Status", "Invalid IP Address")
+                End If
+
+            Next
+        End If
+
+    End Sub
+
+    Private Sub Form1_DragDrop(sender As Object, e As DragEventArgs) Handles MyBase.DragDrop
+        Dim files() As String = e.Data.GetData(DataFormats.FileDrop)
+        For Each path In files
+            MsgBox(path)
+        Next
+    End Sub
+
+    Private Sub Form1_DragEnter(sender As Object, e As DragEventArgs) Handles MyBase.DragEnter
+        If e.Data.GetDataPresent(DataFormats.FileDrop) Then
+            e.Effect = DragDropEffects.Copy
+        End If
+
+    End Sub
+
+    Private Sub Label1_Click(sender As Object, e As EventArgs) Handles Label1.Click
+
+    End Sub
 End Class
